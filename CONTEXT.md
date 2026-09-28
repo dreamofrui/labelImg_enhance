@@ -41,9 +41,9 @@ A **Label** is an annotation attached to a region in an image. In labelImg:
 ### Current Enhancements (Proposed)
 
 #### ADR 001: 键盘循环聚焦标签
-- **Auto-focus**: First label auto-selected when image loads
-- **'h' key**: Cycle to next label (wraps around at end)
-- **Pure keyboard workflow**: D/A (navigate images) + h (cycle labels) + Delete (remove)
+- **Auto-focus**: Last label auto-selected when image loads (current default)
+- **'h' key**: Cycle to previous label (backward, wraps to last at beginning)
+- **Pure keyboard workflow**: D/A (navigate images) + h (cycle labels backward) + Delete (remove)
 
 #### ADR 002: 锁定缩放比例
 - **Lock button**: Toggle zoom lock (no keyboard shortcut by design)
@@ -102,7 +102,7 @@ self.locked_zoom_value: int    # Locked zoom ratio (percentage)
 - `Ctrl+Shift+F`: Fit to width
 
 #### New (Proposed)
-- `h`: Cycle to next label (ADR 001)
+- `h`: Cycle to previous label (backward, ADR 001)
 - `z`: Restore last deleted label (ADR 003)
 - `o`: Delete current image to trash (ADR 003)
 - `u`: Restore last deleted image (ADR 003)
@@ -113,8 +113,8 @@ self.locked_zoom_value: int    # Locked zoom ratio (percentage)
 **Goal**: Review images and labels, delete low-quality data
 
 1. Open directory of images
-2. First image loads, first label auto-selected
-3. Press `h` to cycle through labels
+2. Image loads, last label auto-selected (default Qt behavior)
+3. Press `h` to cycle backward through labels
 4. Press `Delete` to remove bad labels
 5. Press `z` to undo label deletion if needed
 6. Press `o` to delete entire image if quality is poor

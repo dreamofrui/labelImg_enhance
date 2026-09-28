@@ -555,6 +555,23 @@ class MainWindow(QMainWindow, WindowMixin):
         if event.key() == Qt.Key_Control:
             # Draw rectangle if Ctrl is pressed
             self.canvas.set_drawing_shape_to_square(True)
+        elif event.key() == Qt.Key_H:
+            # ADR 001: Cycle to previous label (backward, from last to first)
+            self.cycle_prev_label()
+
+    def cycle_prev_label(self):
+        """Cycle to previous label in the list (wraps around to last)."""
+        if not self.canvas.shapes:
+            return  # Silent ignore when no labels
+
+        current_index = self.label_list.currentRow()
+        # Cycle backward: if at 0 or -1 (no selection), go to last item
+        if current_index <= 0:
+            next_index = self.label_list.count() - 1
+        else:
+            next_index = current_index - 1
+
+        self.label_list.setCurrentRow(next_index)
 
     # Support Functions #
     def set_format(self, save_format):
