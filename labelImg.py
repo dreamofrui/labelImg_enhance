@@ -829,6 +829,14 @@ class MainWindow(QMainWindow, WindowMixin):
         if shape is None:
             # print('rm empty label')
             return
+
+        # 添加防护：检查shape是否在字典中
+        if shape not in self.shapes_to_items:
+            print(f"[ERROR] remove_label: shape not in shapes_to_items dictionary")
+            print(f"  shape: {shape}")
+            print(f"  shapes_to_items keys: {list(self.shapes_to_items.keys())}")
+            return
+
         item = self.shapes_to_items[shape]
         self.label_list.takeItem(self.label_list.row(item))
         del self.shapes_to_items[shape]
@@ -938,6 +946,13 @@ class MainWindow(QMainWindow, WindowMixin):
     def label_selection_changed(self):
         item = self.current_item()
         if item and self.canvas.editing():
+            # 添加防护：检查item是否在字典中
+            if item not in self.items_to_shapes:
+                print(f"[ERROR] label_selection_changed: item not in items_to_shapes dictionary")
+                print(f"  item: {item}")
+                print(f"  items_to_shapes keys: {list(self.items_to_shapes.keys())}")
+                return
+
             self._no_selection_slot = True
             self.canvas.select_shape(self.items_to_shapes[item])
             shape = self.items_to_shapes[item]
@@ -945,6 +960,13 @@ class MainWindow(QMainWindow, WindowMixin):
             self.diffc_button.setChecked(shape.difficult)
 
     def label_item_changed(self, item):
+        # 添加防护：检查item是否在字典中
+        if item not in self.items_to_shapes:
+            print(f"[ERROR] label_item_changed: item not in items_to_shapes dictionary")
+            print(f"  item: {item}")
+            print(f"  items_to_shapes keys: {list(self.items_to_shapes.keys())}")
+            return
+
         shape = self.items_to_shapes[item]
         label = item.text()
         if label != shape.label:
@@ -1178,6 +1200,16 @@ class MainWindow(QMainWindow, WindowMixin):
         return '[{} / {}]'.format(self.cur_img_idx + 1, self.img_count)
 
     def show_bounding_box_from_annotation_file(self, file_path):
+        if file_path is None:
+            return
+
+        # Clear label state to ensure idempotency - prevent duplicate labels
+        # when this method is called multiple times
+        self.label_list.clear()
+        self.items_to_shapes.clear()
+        self.shapes_to_items.clear()
+        # Note: Don't clear canvas.shapes here, as load_labels will call
+        # canvas.load_shapes(s) which overwrites it
         if self.default_save_dir is not None:
             basename = os.path.basename(os.path.splitext(file_path)[0])
             xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
@@ -1356,8 +1388,8 @@ class MainWindow(QMainWindow, WindowMixin):
         else:
             target_dir_path = ustr(default_open_dir_path)
         self.last_open_dir = target_dir_path
-        self.import_dir_images(target_dir_path)
         self.default_save_dir = target_dir_path
+        self.import_dir_images(target_dir_path)
         if self.file_path:
             self.show_bounding_box_from_annotation_file(file_path=self.file_path)
 
@@ -1400,9 +1432,6 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.default_save_dir is not None:
                 if self.dirty is True:
                     self.save_file()
-            else:
-                self.change_save_dir_dialog()
-                return
 
         if not self.may_continue():
             return
@@ -1418,6 +1447,9 @@ class MainWindow(QMainWindow, WindowMixin):
             filename = self.m_img_list[self.cur_img_idx]
             if filename:
                 self.load_file(filename)
+                # Check save directory after loading the image
+                if self.auto_saving.isChecked() and self.default_save_dir is None:
+                    self.change_save_dir_dialog()
 
     def open_next_image(self, _value=False):
         # Proceeding next image without dialog if having any label
@@ -1425,16 +1457,13 @@ class MainWindow(QMainWindow, WindowMixin):
             if self.default_save_dir is not None:
                 if self.dirty is True:
                     self.save_file()
-            else:
-                self.change_save_dir_dialog()
-                return
 
         if not self.may_continue():
             return
 
         if self.img_count <= 0:
             return
-        
+
         if not self.m_img_list:
             return
 
@@ -1449,6 +1478,9 @@ class MainWindow(QMainWindow, WindowMixin):
 
         if filename:
             self.load_file(filename)
+            # Check save directory after loading the image
+            if self.auto_saving.isChecked() and self.default_save_dir is None:
+                self.change_save_dir_dialog()
 
     def open_file(self, _value=False):
         if not self.may_continue():

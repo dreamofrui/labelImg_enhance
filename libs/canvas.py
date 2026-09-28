@@ -467,10 +467,17 @@ class Canvas(QWidget):
         if self.selected_shape:
             shape = self.selected_shape
             self.un_highlight(shape)
-            self.shapes.remove(self.selected_shape)
-            self.selected_shape = None
-            self.update()
-            return shape
+            # 防止删除不在当前列表中的shape（可能是切换图片后的旧shape引用）
+            if self.selected_shape in self.shapes:
+                self.shapes.remove(self.selected_shape)
+                self.selected_shape = None
+                self.update()
+                return shape
+            else:
+                # shape不在当前列表中，直接清空选择
+                self.selected_shape = None
+                self.update()
+                return None
 
     def copy_selected_shape(self):
         if self.selected_shape:
