@@ -1036,6 +1036,9 @@ class MainWindow(QMainWindow, WindowMixin):
         # Arithmetic on scaling factor often results in float
         # Convert to int to avoid type errors
         self.zoom_widget.setValue(int(value))
+        # Sync locked value when manually zooming in locked state
+        if self.lock_zoom_ratio:
+            self.locked_zoom_value = int(value)
 
     def add_zoom(self, increment=10):
         self.set_zoom(self.zoom_widget.value() + increment)
@@ -1269,8 +1272,8 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.update()
 
     def adjust_scale(self, initial=False):
-        if self.lock_zoom_ratio and not initial:
-            # When zoom is locked, maintain the locked value
+        if self.lock_zoom_ratio:
+            # When zoom is locked, maintain the locked value (even on initial load)
             self.zoom_widget.setValue(self.locked_zoom_value)
         else:
             value = self.scalers[self.FIT_WINDOW if initial else self.zoom_mode]()
@@ -1730,12 +1733,11 @@ class MainWindow(QMainWindow, WindowMixin):
         self.actions.lockZoom.setChecked(checked)
 
         if checked:
-            # Reject locking if fit modes are active - they conflict
+            # Auto-exit fit modes when locking (they conflict with fixed zoom)
             if self.actions.fitWindow.isChecked() or self.actions.fitWidth.isChecked():
-                self.status_bar.showMessage("Cannot lock zoom while fit mode is active", 3000)
-                self.lock_zoom_ratio = False
-                self.actions.lockZoom.setChecked(False)
-                return
+                self.actions.fitWindow.setChecked(False)
+                self.actions.fitWidth.setChecked(False)
+                self.zoom_mode = self.MANUAL_ZOOM
 
             # Lock current zoom ratio
             self.locked_zoom_value = self.zoom_widget.value()
