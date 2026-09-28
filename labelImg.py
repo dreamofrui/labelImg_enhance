@@ -318,10 +318,17 @@ class MainWindow(QMainWindow, WindowMixin):
         fit_width = action(get_str('fitWidth'), self.set_fit_width,
                            'Ctrl+Shift+F', 'fit-width', get_str('fitWidthDetail'),
                            checkable=True, enabled=False)
+
+        lock_zoom = action('Lock Zoom', self.toggle_lock_zoom,
+                          'Ctrl+L', 'lock', 'Lock current zoom ratio',
+                          checkable=True, enabled=False)
+
         # Group zoom controls into a list for easier toggling.
         zoom_actions = (self.zoom_widget, zoom_in, zoom_out,
-                        zoom_org, fit_window, fit_width)
+                        zoom_org, fit_window, fit_width, lock_zoom)
         self.zoom_mode = self.MANUAL_ZOOM
+        self.lock_zoom_ratio = settings.get(SETTING_LOCK_ZOOM_RATIO, False)
+        self.locked_zoom_value = 100
         self.scalers = {
             self.FIT_WINDOW: self.scale_fit_window,
             self.FIT_WIDTH: self.scale_fit_width,
@@ -385,7 +392,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
                               zoom=zoom, zoomIn=zoom_in, zoomOut=zoom_out, zoomOrg=zoom_org,
-                              fitWindow=fit_window, fitWidth=fit_width,
+                              fitWindow=fit_window, fitWidth=fit_width, lockZoom=lock_zoom,
                               zoomActions=zoom_actions,
                               lightBrighten=light_brighten, lightDarken=light_darken, lightOrg=light_org,
                               lightActions=light_actions,
@@ -450,7 +457,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.tools = self.toolbar('Tools')
         self.actions.beginner = (
             open, open_dir, change_save_dir, open_next_image, open_prev_image, verify, save, save_format, None, create, copy, delete, None,
-            zoom_in, zoom, zoom_out, fit_window, fit_width, None,
+            zoom_in, zoom, zoom_out, fit_window, fit_width, lock_zoom, None,
             light_brighten, light, light_darken, light_org)
 
         self.actions.advanced = (
@@ -1090,12 +1097,16 @@ class MainWindow(QMainWindow, WindowMixin):
     def set_fit_window(self, value=True):
         if value:
             self.actions.fitWidth.setChecked(False)
+            if self.lock_zoom_ratio:
+                self.toggle_lock_zoom(False)
         self.zoom_mode = self.FIT_WINDOW if value else self.MANUAL_ZOOM
         self.adjust_scale()
 
     def set_fit_width(self, value=True):
         if value:
             self.actions.fitWindow.setChecked(False)
+            if self.lock_zoom_ratio:
+                self.toggle_lock_zoom(False)
         self.zoom_mode = self.FIT_WIDTH if value else self.MANUAL_ZOOM
         self.adjust_scale()
 
@@ -1254,8 +1265,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.update()
 
     def adjust_scale(self, initial=False):
-        value = self.scalers[self.FIT_WINDOW if initial else self.zoom_mode]()
-        self.zoom_widget.setValue(int(100 * value))
+        if self.lock_zoom_ratio and not initial:
+            # When zoom is locked, maintain the locked value
+            self.zoom_widget.setValue(self.locked_zoom_value)
+        else:
+            value = self.scalers[self.FIT_WINDOW if initial else self.zoom_mode]()
+            self.zoom_widget.setValue(int(100 * value))
 
     def scale_fit_window(self):
         """Figure out the size of the pixmap in order to fit the main widget."""
@@ -1306,6 +1321,7 @@ class MainWindow(QMainWindow, WindowMixin):
         settings[SETTING_PAINT_LABEL] = self.display_label_option.isChecked()
         settings[SETTING_DRAW_SQUARE] = self.draw_squares_option.isChecked()
         settings[SETTING_LABEL_FILE_FORMAT] = self.label_file_format
+        settings[SETTING_LOCK_ZOOM_RATIO] = self.lock_zoom_ratio
         settings.save()
 
     def load_recent(self, filename):
@@ -1700,6 +1716,26 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def toggle_draw_square(self):
         self.canvas.set_drawing_shape_to_square(self.draw_squares_option.isChecked())
+
+    def toggle_lock_zoom(self, checked=None):
+        """Toggle zoom ratio lock state"""
+        if checked is None:
+            checked = not self.lock_zoom_ratio
+
+        self.lock_zoom_ratio = checked
+        self.actions.lockZoom.setChecked(checked)
+
+        if checked:
+            # Lock current zoom ratio
+            self.locked_zoom_value = self.zoom_widget.value()
+            # Uncheck fit window and fit width when locking
+            self.actions.fitWindow.setChecked(False)
+            self.actions.fitWidth.setChecked(False)
+            self.zoom_mode = self.MANUAL_ZOOM
+
+        # Update status bar or UI to show lock state
+        status = "Zoom locked at {}%".format(self.locked_zoom_value) if checked else "Zoom unlocked"
+        self.status_bar.showMessage(status, 3000)
 
 def inverted(color):
     return QColor(*[255 - v for v in color.getRgb()])
