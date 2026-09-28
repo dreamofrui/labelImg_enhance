@@ -329,6 +329,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.zoom_mode = self.MANUAL_ZOOM
         self.lock_zoom_ratio = settings.get(SETTING_LOCK_ZOOM_RATIO, False)
         self.locked_zoom_value = 100
+        lock_zoom.setChecked(self.lock_zoom_ratio)
         self.scalers = {
             self.FIT_WINDOW: self.scale_fit_window,
             self.FIT_WIDTH: self.scale_fit_width,
@@ -1094,19 +1095,22 @@ class MainWindow(QMainWindow, WindowMixin):
     def light_request(self, delta):
         self.add_light(5*delta // (8 * 15))
 
+    def _ensure_zoom_unlocked(self):
+        """Unlock zoom if it's currently locked (for conflicting modes)"""
+        if self.lock_zoom_ratio:
+            self.toggle_lock_zoom(False)
+
     def set_fit_window(self, value=True):
         if value:
             self.actions.fitWidth.setChecked(False)
-            if self.lock_zoom_ratio:
-                self.toggle_lock_zoom(False)
+            self._ensure_zoom_unlocked()
         self.zoom_mode = self.FIT_WINDOW if value else self.MANUAL_ZOOM
         self.adjust_scale()
 
     def set_fit_width(self, value=True):
         if value:
             self.actions.fitWindow.setChecked(False)
-            if self.lock_zoom_ratio:
-                self.toggle_lock_zoom(False)
+            self._ensure_zoom_unlocked()
         self.zoom_mode = self.FIT_WIDTH if value else self.MANUAL_ZOOM
         self.adjust_scale()
 
@@ -1726,11 +1730,15 @@ class MainWindow(QMainWindow, WindowMixin):
         self.actions.lockZoom.setChecked(checked)
 
         if checked:
+            # Reject locking if fit modes are active - they conflict
+            if self.actions.fitWindow.isChecked() or self.actions.fitWidth.isChecked():
+                self.status_bar.showMessage("Cannot lock zoom while fit mode is active", 3000)
+                self.lock_zoom_ratio = False
+                self.actions.lockZoom.setChecked(False)
+                return
+
             # Lock current zoom ratio
             self.locked_zoom_value = self.zoom_widget.value()
-            # Uncheck fit window and fit width when locking
-            self.actions.fitWindow.setChecked(False)
-            self.actions.fitWidth.setChecked(False)
             self.zoom_mode = self.MANUAL_ZOOM
 
         # Update status bar or UI to show lock state
