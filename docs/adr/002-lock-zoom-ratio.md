@@ -1,7 +1,7 @@
 # ADR 002: 锁定缩放比例模式
 
 ## Status
-Proposed
+Implemented
 
 ## Context
 当前行为：切换图片时，如果之前是手动缩放（MANUAL_ZOOM），会自动切回自适应模式（通常是 FIT_WINDOW），导致每张图片的显示比例不一致。
