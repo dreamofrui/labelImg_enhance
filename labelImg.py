@@ -1884,9 +1884,8 @@ class MainWindow(QMainWindow, WindowMixin):
         - Pops from image_deletion_stack (LIFO order)
         - Moves image and label file back to original directory
         - Overwrites if same-name file exists in original location
-        - Inserts at current index position in m_img_list
-        - Loads the restored image immediately
-        - Supports cross-directory restoration
+        - Only inserts to m_img_list if restored image belongs to current directory
+        - Loads the restored image immediately if inserted
         - Silent ignore if stack is empty
         """
         if not self.image_deletion_stack:
@@ -1925,36 +1924,52 @@ class MainWindow(QMainWindow, WindowMixin):
                 print(f"Warning: Failed to restore label from trash: {e}")
                 # Label restoration failed, but image was restored, so continue
 
-        # Insert into m_img_list at current position
-        if not self.m_img_list:
-            # List is empty, need to reload directory
-            if os.path.exists(original_dir):
-                self.import_dir_images(original_dir)
-                # Find the restored image in the newly loaded list
-                if original_img_path in self.m_img_list:
-                    self.cur_img_idx = self.m_img_list.index(original_img_path)
-                else:
-                    self.cur_img_idx = 0
-            else:
-                print(f"Warning: Original directory no longer exists: {original_dir}")
-                return
-        else:
-            # Insert at current index position
-            insert_pos = self.cur_img_idx
-            self.m_img_list.insert(insert_pos, original_img_path)
-            self.img_count = len(self.m_img_list)
-            self.cur_img_idx = insert_pos
-
-            # Update file_list_widget
-            item = QListWidgetItem(original_img_path)
-            self.file_list_widget.insertItem(insert_pos, item)
-
-        # Load the restored image immediately
-        self.load_file(original_img_path)
-
         print(f"Restored image from trash: {original_img_path}")
-        if trash_label_path:
+        if trash_label_path and os.path.exists(original_label_path):
             print(f"Restored label from trash: {original_label_path}")
+
+        # Check if restored image belongs to current directory
+        # Only insert and load if it's in the same directory we're currently viewing
+        current_dir = self.dir_name if self.dir_name else (os.path.dirname(self.m_img_list[0]) if self.m_img_list else None)
+
+        # Normalize paths for comparison (handle different path separators)
+        if current_dir:
+            current_dir_normalized = os.path.normpath(current_dir)
+            original_dir_normalized = os.path.normpath(original_dir)
+
+            if current_dir_normalized == original_dir_normalized:
+                # Same directory - insert into list and load
+                if not self.m_img_list:
+                    # List is empty, reload directory
+                    self.import_dir_images(original_dir)
+                    if original_img_path in self.m_img_list:
+                        self.cur_img_idx = self.m_img_list.index(original_img_path)
+                    else:
+                        self.cur_img_idx = 0
+                else:
+                    # Insert at current index position
+                    insert_pos = self.cur_img_idx
+                    self.m_img_list.insert(insert_pos, original_img_path)
+                    self.img_count = len(self.m_img_list)
+                    self.cur_img_idx = insert_pos
+
+                    # Update file_list_widget
+                    item = QListWidgetItem(original_img_path)
+                    self.file_list_widget.insertItem(insert_pos, item)
+
+                # Load the restored image immediately
+                self.load_file(original_img_path)
+                print(f"Image inserted to current list and loaded")
+            else:
+                # Different directory - file restored but not inserted to current list
+                print(f"Image restored to {original_dir} (different from current directory)")
+                print(f"File restored to disk but not inserted into current image list")
+        else:
+            # No current directory context, reload the original directory
+            self.import_dir_images(original_dir)
+            if original_img_path in self.m_img_list:
+                self.cur_img_idx = self.m_img_list.index(original_img_path)
+                self.load_file(original_img_path)
 
     def reset_all(self):
         self.settings.reset()
