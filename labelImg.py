@@ -327,9 +327,8 @@ class MainWindow(QMainWindow, WindowMixin):
         zoom_actions = (self.zoom_widget, zoom_in, zoom_out,
                         zoom_org, fit_window, fit_width, lock_zoom)
         self.zoom_mode = self.MANUAL_ZOOM
-        self.lock_zoom_ratio = settings.get(SETTING_LOCK_ZOOM_RATIO, False)
+        self.lock_zoom_ratio = False  # Always start unlocked (not persisted per ADR-002)
         self.locked_zoom_value = 100
-        lock_zoom.setChecked(self.lock_zoom_ratio)
         self.scalers = {
             self.FIT_WINDOW: self.scale_fit_window,
             self.FIT_WIDTH: self.scale_fit_width,
@@ -1345,7 +1344,7 @@ class MainWindow(QMainWindow, WindowMixin):
         settings[SETTING_PAINT_LABEL] = self.display_label_option.isChecked()
         settings[SETTING_DRAW_SQUARE] = self.draw_squares_option.isChecked()
         settings[SETTING_LABEL_FILE_FORMAT] = self.label_file_format
-        settings[SETTING_LOCK_ZOOM_RATIO] = self.lock_zoom_ratio
+        # SETTING_LOCK_ZOOM_RATIO intentionally not persisted per ADR-002
         settings.save()
 
     def load_recent(self, filename):
