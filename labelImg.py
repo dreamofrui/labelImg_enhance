@@ -398,8 +398,10 @@ class MainWindow(QMainWindow, WindowMixin):
         # File list context menu (ADR 003)
         delete_file_to_trash = action('Delete to Trash', self.delete_file_to_trash_from_menu,
                                        'Ctrl+D', 'delete', 'Delete selected file to temporary trash')
+        restore_image_from_trash = action('Restore Image', self.restore_last_deleted_image,
+                                          'u', 'undo', 'Restore last deleted image from trash')
         file_list_menu = QMenu()
-        add_actions(file_list_menu, (delete_file_to_trash,))
+        add_actions(file_list_menu, (delete_file_to_trash, restore_image_from_trash))
 
         # Draw squares/rectangles
         self.draw_squares_option = QAction(get_str('drawSquares'), self)
@@ -583,6 +585,9 @@ class MainWindow(QMainWindow, WindowMixin):
         elif event.key() == Qt.Key_O:
             # ADR 003: Delete current image to temporary trash
             self.delete_current_image()
+        elif event.key() == Qt.Key_U:
+            # ADR 003: Restore last deleted image from trash
+            self.restore_last_deleted_image()
 
     def cycle_prev_label(self):
         """Cycle to previous label in the list (wraps around to last)."""
@@ -1872,6 +1877,84 @@ class MainWindow(QMainWindow, WindowMixin):
         print(f"Deleted image to trash: {trash_img_path}")
         if trash_label_path:
             print(f"Deleted label to trash: {trash_label_path}")
+
+    def restore_last_deleted_image(self):
+        """
+        Restore the last deleted image from trash (ADR 003).
+        - Pops from image_deletion_stack (LIFO order)
+        - Moves image and label file back to original directory
+        - Overwrites if same-name file exists in original location
+        - Inserts at current index position in m_img_list
+        - Loads the restored image immediately
+        - Supports cross-directory restoration
+        - Silent ignore if stack is empty
+        """
+        if not self.image_deletion_stack:
+            return  # Silent ignore when stack is empty
+
+        # Pop the last deletion record
+        trash_img_path, trash_label_path, original_dir = self.image_deletion_stack.pop()
+
+        # Verify trash files still exist
+        if not os.path.exists(trash_img_path):
+            print(f"Warning: Trash image file not found: {trash_img_path}")
+            return
+
+        # Construct original paths
+        original_img_path = os.path.join(original_dir, os.path.basename(trash_img_path))
+
+        # Move image back to original directory (overwrite if exists)
+        try:
+            if os.path.exists(original_img_path):
+                os.remove(original_img_path)  # Remove existing file
+            shutil.move(trash_img_path, original_img_path)
+        except Exception as e:
+            print(f"Error restoring image from trash: {e}")
+            # Push back to stack if restoration failed
+            self.image_deletion_stack.append((trash_img_path, trash_label_path, original_dir))
+            return
+
+        # Move label back if it exists in trash
+        if trash_label_path and os.path.exists(trash_label_path):
+            original_label_path = os.path.join(original_dir, os.path.basename(trash_label_path))
+            try:
+                if os.path.exists(original_label_path):
+                    os.remove(original_label_path)  # Remove existing file
+                shutil.move(trash_label_path, original_label_path)
+            except Exception as e:
+                print(f"Warning: Failed to restore label from trash: {e}")
+                # Label restoration failed, but image was restored, so continue
+
+        # Insert into m_img_list at current position
+        if not self.m_img_list:
+            # List is empty, need to reload directory
+            if os.path.exists(original_dir):
+                self.import_dir_images(original_dir)
+                # Find the restored image in the newly loaded list
+                if original_img_path in self.m_img_list:
+                    self.cur_img_idx = self.m_img_list.index(original_img_path)
+                else:
+                    self.cur_img_idx = 0
+            else:
+                print(f"Warning: Original directory no longer exists: {original_dir}")
+                return
+        else:
+            # Insert at current index position
+            insert_pos = self.cur_img_idx
+            self.m_img_list.insert(insert_pos, original_img_path)
+            self.img_count = len(self.m_img_list)
+            self.cur_img_idx = insert_pos
+
+            # Update file_list_widget
+            item = QListWidgetItem(original_img_path)
+            self.file_list_widget.insertItem(insert_pos, item)
+
+        # Load the restored image immediately
+        self.load_file(original_img_path)
+
+        print(f"Restored image from trash: {original_img_path}")
+        if trash_label_path:
+            print(f"Restored label from trash: {original_label_path}")
 
     def reset_all(self):
         self.settings.reset()
