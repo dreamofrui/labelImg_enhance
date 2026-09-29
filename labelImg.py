@@ -6,6 +6,8 @@ import os.path
 import platform
 import shutil
 import sys
+import tempfile
+import time
 import webbrowser as wb
 from functools import partial
 
@@ -50,6 +52,9 @@ from libs.hashableQListWidgetItem import HashableQListWidgetItem
 
 __appname__ = 'labelImg'
 
+# Trash directory configuration
+TRASH_RETENTION_SECONDS = 24 * 60 * 60  # 24 hours
+
 
 class WindowMixin(object):
 
@@ -83,6 +88,9 @@ class MainWindow(QMainWindow, WindowMixin):
         settings = self.settings
 
         self.os_name = platform.system()
+
+        # Initialize temporary trash directory infrastructure
+        self.trash_dir = self._init_trash_directory()
 
         # Load string bundle for i18n
         self.string_bundle = StringBundle.get_bundle()
@@ -571,6 +579,88 @@ class MainWindow(QMainWindow, WindowMixin):
             next_index = current_index - 1
 
         self.label_list.setCurrentRow(next_index)
+
+    def _init_trash_directory(self):
+        """
+        Initialize temporary trash directory infrastructure.
+        Creates a timestamped trash directory and cleans up old ones.
+
+        Returns:
+            str: Path to the trash directory, or None if creation failed
+        """
+        try:
+            # Get system temporary directory (cross-platform)
+            temp_base = tempfile.gettempdir()
+
+            # Clean up old trash directories (older than 24 hours)
+            self._cleanup_old_trash_dirs(temp_base)
+
+            # Create new trash directory with timestamp
+            timestamp = int(time.time())
+            trash_dir = os.path.join(temp_base, f'labelImg_trash_{timestamp}')
+
+            os.makedirs(trash_dir, exist_ok=True)
+            return trash_dir
+
+        except (OSError, PermissionError) as e:
+            # Log error but don't block application startup
+            print(f'Warning: Failed to create trash directory: {e}')
+            return None
+
+    def _cleanup_old_trash_dirs(self, temp_base):
+        """
+        Clean up labelImg_trash_* directories older than 24 hours.
+
+        Args:
+            temp_base (str): Base temporary directory path
+        """
+        if not temp_base or not os.path.exists(temp_base):
+            return
+
+        try:
+            current_time = time.time()
+
+            for item in os.listdir(temp_base):
+                if not item.startswith('labelImg_trash_'):
+                    continue
+
+                item_path = os.path.join(temp_base, item)
+
+                # Skip if not a directory
+                if not os.path.isdir(item_path):
+                    continue
+
+                # Try to parse timestamp and clean up if old
+                if self._should_cleanup_trash_dir(item, current_time):
+                    try:
+                        shutil.rmtree(item_path)
+                    except OSError as e:
+                        # Permission denied or directory in use - skip silently
+                        pass
+
+        except (OSError, PermissionError) as e:
+            # Don't let cleanup errors block startup
+            print(f'Warning: Error during trash cleanup: {e}')
+
+    def _should_cleanup_trash_dir(self, dir_name, current_time):
+        """
+        Check if a trash directory should be cleaned up based on its age.
+
+        Args:
+            dir_name (str): Directory name (e.g., 'labelImg_trash_1234567890')
+            current_time (float): Current timestamp
+
+        Returns:
+            bool: True if directory is older than retention threshold
+        """
+        try:
+            timestamp_str = dir_name.replace('labelImg_trash_', '')
+            dir_timestamp = int(timestamp_str)
+            age = current_time - dir_timestamp
+            return age > TRASH_RETENTION_SECONDS
+        except (ValueError, OverflowError):
+            # Invalid timestamp format - don't clean up
+            return False
 
     # Support Functions #
     def set_format(self, save_format):
