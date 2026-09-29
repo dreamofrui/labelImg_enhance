@@ -92,6 +92,9 @@ class MainWindow(QMainWindow, WindowMixin):
         # Initialize temporary trash directory infrastructure
         self.trash_dir = self._init_trash_directory()
 
+        # Image deletion stack for undo functionality (ADR 003)
+        self.image_deletion_stack = []  # List of (trash_img_path, trash_label_path, original_dir)
+
         # Load string bundle for i18n
         self.string_bundle = StringBundle.get_bundle()
         get_str = lambda str_id: self.string_bundle.get_string(str_id)
@@ -179,6 +182,11 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.file_list_widget = QListWidget()
         self.file_list_widget.itemDoubleClicked.connect(self.file_item_double_clicked)
+
+        # File list context menu (ADR 003)
+        self.file_list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.file_list_widget.customContextMenuRequested.connect(self.pop_file_list_menu)
+
         file_list_layout = QVBoxLayout()
         file_list_layout.setContentsMargins(0, 0, 0, 0)
         file_list_layout.addWidget(self.file_list_widget)
@@ -387,6 +395,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.label_list.customContextMenuRequested.connect(
             self.pop_label_list_menu)
 
+        # File list context menu (ADR 003)
+        delete_file_to_trash = action('Delete to Trash', self.delete_file_to_trash_from_menu,
+                                       'Ctrl+D', 'delete', 'Delete selected file to temporary trash')
+        file_list_menu = QMenu()
+        add_actions(file_list_menu, (delete_file_to_trash,))
+
         # Draw squares/rectangles
         self.draw_squares_option = QAction(get_str('drawSquares'), self)
         self.draw_squares_option.setShortcut('Ctrl+Shift+R')
@@ -422,7 +436,8 @@ class MainWindow(QMainWindow, WindowMixin):
             view=self.menu(get_str('menu_view')),
             help=self.menu(get_str('menu_help')),
             recentFiles=QMenu(get_str('menu_openRecent')),
-            labelList=label_menu)
+            labelList=label_menu,
+            fileList=file_list_menu)
 
         # Auto saving : Enable auto saving if pressing next
         self.auto_saving = QAction(get_str('autoSaveMode'), self)
@@ -565,6 +580,9 @@ class MainWindow(QMainWindow, WindowMixin):
         elif event.key() == Qt.Key_H:
             # ADR 001: Cycle to previous label (backward, from last to first)
             self.cycle_prev_label()
+        elif event.key() == Qt.Key_O:
+            # ADR 003: Delete current image to temporary trash
+            self.delete_current_image()
 
     def cycle_prev_label(self):
         """Cycle to previous label in the list (wraps around to last)."""
@@ -862,6 +880,32 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def pop_label_list_menu(self, point):
         self.menus.labelList.exec_(self.label_list.mapToGlobal(point))
+
+    def pop_file_list_menu(self, point):
+        """Show context menu for file list (ADR 003)."""
+        self.menus.fileList.exec_(self.file_list_widget.mapToGlobal(point))
+
+    def delete_file_to_trash_from_menu(self):
+        """Delete selected file from file list to trash (ADR 003)."""
+        current_item = self.file_list_widget.currentItem()
+        if current_item is None:
+            return
+
+        # Get the selected file path
+        selected_filename = ustr(current_item.text())
+        if selected_filename not in self.m_img_list:
+            return
+
+        # Find the index and load that file
+        selected_index = self.m_img_list.index(selected_filename)
+
+        # If it's not the current image, load it first, then delete
+        if self.cur_img_idx != selected_index:
+            self.cur_img_idx = selected_index
+            self.load_file(selected_filename)
+
+        # Now delete the current image
+        self.delete_current_image()
 
     def edit_label(self):
         if not self.canvas.editing():
@@ -1690,6 +1734,144 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.load_file(filename)
             else:
                 self.close_file()
+
+    def _find_label_file_for_image(self, image_path):
+        """
+        Find the label file associated with an image.
+        Searches in default_save_dir first, then in image directory.
+        Returns the label file path if found, None otherwise.
+        """
+        image_name_without_ext = os.path.splitext(os.path.basename(image_path))[0]
+        original_dir = os.path.dirname(image_path)
+
+        # Check for label file in default_save_dir first
+        if self.default_save_dir is not None and os.path.exists(self.default_save_dir):
+            # Check current format first
+            if self.label_file_format == LabelFileFormat.PASCAL_VOC:
+                potential_label = os.path.join(self.default_save_dir, image_name_without_ext + XML_EXT)
+                if os.path.exists(potential_label):
+                    return potential_label
+            elif self.label_file_format == LabelFileFormat.YOLO:
+                potential_label = os.path.join(self.default_save_dir, image_name_without_ext + TXT_EXT)
+                if os.path.exists(potential_label):
+                    return potential_label
+            elif self.label_file_format == LabelFileFormat.CREATE_ML:
+                potential_label = os.path.join(self.default_save_dir, image_name_without_ext + JSON_EXT)
+                if os.path.exists(potential_label):
+                    return potential_label
+
+        # If not found in default_save_dir, check in image directory
+        # Try all possible formats in priority order (XML > TXT > JSON)
+        xml_path = os.path.join(original_dir, image_name_without_ext + XML_EXT)
+        if os.path.exists(xml_path):
+            return xml_path
+
+        txt_path = os.path.join(original_dir, image_name_without_ext + TXT_EXT)
+        if os.path.exists(txt_path):
+            return txt_path
+
+        json_path = os.path.join(original_dir, image_name_without_ext + JSON_EXT)
+        if os.path.exists(json_path):
+            return json_path
+
+        return None
+
+    def _move_to_trash_with_overwrite(self, src_path, trash_dir):
+        """
+        Move file to trash directory, overwriting if destination exists.
+        Returns the destination path if successful, None if failed.
+        """
+        if not os.path.exists(src_path):
+            return None
+
+        basename = os.path.basename(src_path)
+        dst_path = os.path.join(trash_dir, basename)
+
+        try:
+            # Remove destination if it exists (ADR 003: overwrite old file)
+            if os.path.exists(dst_path):
+                os.remove(dst_path)
+
+            # Move the file
+            shutil.move(src_path, dst_path)
+            return dst_path
+        except Exception as e:
+            print(f"Error moving {src_path} to trash: {e}")
+            return None
+
+    def delete_current_image(self):
+        """
+        Delete current image and its label file to temporary trash (ADR 003).
+        - No confirmation dialog
+        - Moves both image and label file to trash_dir
+        - Same-name conflicts overwrite old file
+        - Pushes deletion record to image_deletion_stack
+        - Removes from m_img_list and updates file_list_widget
+        - Loads next image (or previous if last, or shows blank if empty)
+        - Clears label_deletion_stack (if implemented)
+        """
+        if self.file_path is None:
+            return  # No image loaded
+
+        if self.trash_dir is None:
+            print("Warning: Trash directory not available, cannot delete image")
+            return
+
+        image_path = self.file_path
+        if not os.path.exists(image_path):
+            print(f"Warning: Image file does not exist: {image_path}")
+            return
+
+        original_dir = os.path.dirname(image_path)
+
+        # Find associated label file
+        label_path = self._find_label_file_for_image(image_path)
+
+        # Move image to trash with overwrite support
+        trash_img_path = self._move_to_trash_with_overwrite(image_path, self.trash_dir)
+        if trash_img_path is None:
+            print(f"Error: Failed to move image to trash: {image_path}")
+            return
+
+        # Move label to trash (if exists) with overwrite support
+        trash_label_path = None
+        if label_path:
+            trash_label_path = self._move_to_trash_with_overwrite(label_path, self.trash_dir)
+            if trash_label_path is None:
+                print(f"Warning: Failed to move label to trash: {label_path}")
+                # Note: Image already moved, but we continue with image-only deletion
+                # Label path will be recorded as None in the stack
+
+        # Push deletion record to stack
+        self.image_deletion_stack.append((trash_img_path, trash_label_path, original_dir))
+
+        # Clear label_deletion_stack (ADR 003 requirement)
+        if hasattr(self, 'label_deletion_stack'):
+            self.label_deletion_stack.clear()
+
+        # Remove from m_img_list and update UI
+        if image_path in self.m_img_list:
+            removed_index = self.m_img_list.index(image_path)
+            self.m_img_list.remove(image_path)
+            self.img_count = len(self.m_img_list)
+
+            # Update file_list_widget
+            self.file_list_widget.takeItem(removed_index)
+
+            # Determine next image to load
+            if self.img_count > 0:
+                # Load next image at same index (or previous if was last)
+                next_index = min(removed_index, self.img_count - 1)
+                self.cur_img_idx = next_index
+                next_filename = self.m_img_list[next_index]
+                self.load_file(next_filename)
+            else:
+                # No images left, show blank
+                self.close_file()
+
+        print(f"Deleted image to trash: {trash_img_path}")
+        if trash_label_path:
+            print(f"Deleted label to trash: {trash_label_path}")
 
     def reset_all(self):
         self.settings.reset()
