@@ -1,0 +1,7 @@
+# ARS detection labels
+car
+truck
+bus
+motorcycle
+bicycle
+pedestrian

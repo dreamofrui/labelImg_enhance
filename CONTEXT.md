@@ -15,6 +15,23 @@ A **Label** is an annotation attached to a region in an image. In labelImg:
 - Restore: `restore_last_deleted_label()` pops from `label_deletion_stack` and restores label (ADR 003 - Issue #7)
 - Cycle: `cycle_next_label()` moves selection to next label (ADR 001)
 
+#### Label Preset（标签组）
+A **Label Preset** is a predefined set of label names for a specific annotation project. In labelImg:
+- Stored as `.txt` files under `data/label_presets/` directory (one label per line)
+- Loaded into `self.label_hist` at startup or when user switches presets
+- User selects one preset from the menu; selection persisted to `settings.pkl`
+- Switching presets clears temporary labels added during the current session
+
+**Terminology**:
+- _Avoid_: "label set", "label group", "label template", "classes file"
+- _Use_: "label preset" (noun), "switch preset" (verb)
+
+**Behavior** (ADR 004):
+- Default preset: `data/predefined_classes.txt` (backward compatible)
+- Additional presets: `data/label_presets/*.txt` (file name without extension = preset name)
+- Temporary labels: user-added labels during annotation are session-only, cleared on preset switch
+- No in-app preset editing: users manage `.txt` files directly in file system
+
 #### Image Deletion（图片删除）
 **Temporary trash deletion** with undo support (ADR 003):
 - Deleted images move to system temp directory `%TEMP%/labelImg_trash_{timestamp}/`
@@ -76,9 +93,16 @@ self.cur_img_idx: int       # Current image index
 
 # Label management
 self.canvas.shapes: List[Shape]         # All shapes in current image
+self.label_hist: List[str]              # Available labels for current preset (loaded from preset file)
+                                         # Temporary labels added during annotation are appended but not persisted
+                                         # Cleared and reloaded when switching presets (ADR 004)
 self.label_deletion_stack: List[tuple]  # Undo stack for labels: (shape, label_text, item_flags)
                                          # Cleared when switching images, saving, or deleting image
                                          # Press 'z' to restore (Issue #7 - ADR 003)
+
+# Label presets (ADR 004)
+self.current_preset: str                # Name of currently loaded preset (file name without extension)
+                                         # Persisted to settings.pkl, restored on next launch
 
 # Image deletion
 self.image_deletion_stack: List[tuple]  # Undo stack for images: (trash_img_path, trash_label_path, original_dir)
@@ -102,8 +126,9 @@ self.locked_zoom_value: int    # Locked zoom ratio (percentage)
 - `Ctrl+F`: Fit to window
 - `Ctrl+Shift+F`: Fit to width
 
-#### New (Proposed)
-- `h`: Cycle to previous label (backward, ADR 001)
+#### Enhanced/New
+- `E`: Edit label (changed from Ctrl+E)
+- `i`: Cycle to previous label (changed from k, ADR 001)
 - `z`: Restore last deleted label (ADR 003)
 - `o`: Delete current image to trash (ADR 003)
 - `u`: Restore last deleted image (ADR 003)
@@ -115,7 +140,7 @@ self.locked_zoom_value: int    # Locked zoom ratio (percentage)
 
 1. Open directory of images
 2. Image loads, last label auto-selected (default Qt behavior)
-3. Press `h` to cycle backward through labels
+3. Press `i` to cycle backward through labels
 4. Press `Delete` to remove bad labels
 5. Press `z` to undo label deletion if needed
 6. Press `o` to delete entire image if quality is poor

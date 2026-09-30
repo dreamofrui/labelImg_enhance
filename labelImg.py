@@ -110,6 +110,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.m_img_list = []
         self.dir_name = None
         self.label_hist = []
+        self.current_preset = "default"  # Current loaded preset name
         self.last_open_dir = None
         self.cur_img_idx = 0
         self.img_count = len(self.m_img_list)
@@ -121,13 +122,20 @@ class MainWindow(QMainWindow, WindowMixin):
         self._beginner = True
         self.screencast = "https://youtu.be/p0nR2YsCY_U"
 
-        # Load predefined classes to the list
-        self.load_predefined_classes(default_prefdef_class_file)
+        # Load preset from settings, or use first available preset
+        saved_preset = self.settings.get(SETTING_CURRENT_PRESET, None)
+        if not saved_preset:
+            # Get first available preset
+            available_presets = self.get_available_presets()
+            if available_presets:
+                saved_preset = available_presets[0]
+            else:
+                saved_preset = "ADC"  # Fallback
 
-        if self.label_hist:
-            self.default_label = self.label_hist[0]
-        else:
-            print("Not find:/data/predefined_classes.txt (optional)")
+        self.load_preset(saved_preset)
+
+        if not self.label_hist:
+            print("Warning: No labels loaded from preset '%s'" % saved_preset)
 
         # Main widgets and related state.
         self.label_dialog = LabelDialog(parent=self, list_item=self.label_hist)
@@ -376,7 +384,7 @@ class MainWindow(QMainWindow, WindowMixin):
                          light_darken, light_org)
 
         edit = action(get_str('editLabel'), self.edit_label,
-                      'Ctrl+E', 'edit', get_str('editLabelDetail'),
+                      'E', 'edit', get_str('editLabelDetail'),
                       enabled=False)
         self.edit_button.setDefaultAction(edit)
 
@@ -402,7 +410,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Navigation actions
         prev_label = action('&Previous Label', self.cycle_prev_label,
-                           'k', 'prev', 'Cycle to previous label in list')
+                           'i', 'prev', 'Cycle to previous label in list')
         self.addAction(prev_label)  # Add to MainWindow for global shortcut
 
         # Delete actions
@@ -471,6 +479,7 @@ class MainWindow(QMainWindow, WindowMixin):
             file=self.menu(get_str('menu_file')),
             edit=self.menu(get_str('menu_edit')),
             view=self.menu(get_str('menu_view')),
+            label_presets=self.menu('Label &Presets'),
             help=self.menu(get_str('menu_help')),
             recentFiles=QMenu(get_str('menu_openRecent')),
             labelList=label_menu,
@@ -505,6 +514,9 @@ class MainWindow(QMainWindow, WindowMixin):
             zoom_in, zoom_out, zoom_org, None,
             fit_window, fit_width, lock_zoom, None,
             light_brighten, light_darken, light_org))
+
+        # Build Label Presets menu
+        self.build_preset_menu()
 
         self.menus.file.aboutToShow.connect(self.update_file_menu)
 
@@ -1130,7 +1142,13 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.label_list.item(i).setCheckState(2)
 
     def default_label_combo_selection_changed(self, index):
-        self.default_label=self.label_hist[index]
+        if index >= 0 and index < len(self.label_hist):
+            self.default_label = self.label_hist[index]
+
+    def default_label_text_changed(self, text):
+        """Handle user typing in the default label combo box"""
+        if text:
+            self.default_label = text
 
     def label_selection_changed(self):
         item = self.current_item()
@@ -1512,6 +1530,7 @@ class MainWindow(QMainWindow, WindowMixin):
         settings[SETTING_PAINT_LABEL] = self.display_label_option.isChecked()
         settings[SETTING_DRAW_SQUARE] = self.draw_squares_option.isChecked()
         settings[SETTING_LABEL_FILE_FORMAT] = self.label_file_format
+        settings[SETTING_CURRENT_PRESET] = self.current_preset
         # SETTING_LOCK_ZOOM_RATIO intentionally not persisted per ADR-002
         settings.save()
 
@@ -2127,10 +2146,199 @@ class MainWindow(QMainWindow, WindowMixin):
             with codecs.open(predef_classes_file, 'r', 'utf8') as f:
                 for line in f:
                     line = line.strip()
-                    if self.label_hist is None:
-                        self.label_hist = [line]
-                    else:
-                        self.label_hist.append(line)
+                    # Skip empty lines and comment lines starting with #
+                    if line and not line.startswith('#'):
+                        if self.label_hist is None:
+                            self.label_hist = [line]
+                        else:
+                            self.label_hist.append(line)
+
+    def get_available_presets(self):
+        """
+        Scan and return all available label preset names (including root .txt files)
+        Returns: [('ADC', 'data/ADC.txt'), ('ARS', 'data/label_presets/ARS.txt'), ...]
+        Each tuple contains (display_name, file_path)
+        """
+        presets = []
+
+        # Scan data/ root directory for .txt files
+        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        if os.path.exists(data_dir):
+            try:
+                for f in os.listdir(data_dir):
+                    if f.endswith('.txt') and os.path.isfile(os.path.join(data_dir, f)):
+                        preset_name = f[:-4]  # Remove .txt extension
+                        presets.append(preset_name)
+            except OSError as e:
+                print("Warning: Cannot read data directory: %s" % e)
+
+        # Scan data/label_presets/ directory
+        preset_dir = os.path.join(os.path.dirname(__file__), 'data', 'label_presets')
+        if os.path.exists(preset_dir):
+            try:
+                all_files = os.listdir(preset_dir)
+                preset_files = [f[:-4] for f in all_files
+                               if f.endswith('.txt') and not f.startswith('.')]
+                presets.extend(preset_files)
+            except OSError as e:
+                print("Warning: Cannot read preset directory: %s" % e)
+
+        return sorted(presets)
+
+    def load_preset(self, preset_name):
+        """
+        Load specified label preset, clear existing label_hist and reload
+
+        Args:
+            preset_name: preset name (file name without .txt extension, e.g., "ADC", "ARS")
+
+        Returns:
+            bool: True if loaded successfully, False otherwise
+        """
+        # Determine file path - check both data/ root and data/label_presets/
+        data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        preset_file = None
+
+        # First check data/ root
+        root_file = os.path.join(data_dir, preset_name + '.txt')
+        if os.path.exists(root_file):
+            preset_file = root_file
+        else:
+            # Then check data/label_presets/
+            presets_file = os.path.join(data_dir, 'label_presets', preset_name + '.txt')
+            if os.path.exists(presets_file):
+                preset_file = presets_file
+
+        # Check if file exists
+        if not preset_file or not os.path.exists(preset_file):
+            print("Warning: Preset file not found: %s" % preset_name)
+            # Try to fallback to first available preset
+            available_presets = self.get_available_presets()
+            if available_presets and available_presets[0] != preset_name:
+                print("Falling back to preset: %s" % available_presets[0])
+                return self.load_preset(available_presets[0])
+            else:
+                print("Error: No preset files found!")
+                return False
+
+        # Clear and reload
+        self.label_hist = []
+        self.load_predefined_classes(preset_file)
+
+        # Validate that we loaded something
+        if not self.label_hist:
+            print("Warning: Preset '%s' is empty or invalid" % preset_name)
+            available_presets = self.get_available_presets()
+            if available_presets and available_presets[0] != preset_name:
+                return self.load_preset(available_presets[0])
+            return False
+
+        # Update current preset name
+        self.current_preset = preset_name
+
+        # Update UI components (only if they exist)
+        # 1. Update default_label_combo_box
+        if hasattr(self, 'default_label_combo_box'):
+            self.default_label_combo_box.cb.clear()
+            self.default_label_combo_box.cb.addItems(self.label_hist)
+            if len(self.label_hist) > 0:
+                self.default_label = self.label_hist[0]
+
+        # 2. Rebuild label_dialog
+        if hasattr(self, 'label_dialog'):
+            self.label_dialog = LabelDialog(parent=self, list_item=self.label_hist)
+
+        # 3. Update combo_box (unique labels filter)
+        if hasattr(self, 'combo_box'):
+            self.update_combo_box()
+
+        return True
+
+    def switch_preset(self, preset_name):
+        """
+        Switch to specified label preset
+
+        Args:
+            preset_name: target preset name
+
+        Returns:
+            bool: whether the switch was successful
+        """
+        # If already current preset, no need to switch
+        if preset_name == self.current_preset:
+            return True
+
+        # Check for unsaved annotations (reference: open_next_image logic)
+        if self.dirty and not self.may_continue():
+            # User canceled, revert menu check
+            self.update_preset_menu_check(self.current_preset)
+            return False
+
+        # Save old state for rollback
+        old_preset = self.current_preset
+        old_label_hist = self.label_hist.copy() if self.label_hist else []
+
+        # Attempt to load new preset
+        if not self.load_preset(preset_name):
+            # Load failed, rollback
+            self.label_hist = old_label_hist
+            self.current_preset = old_preset
+            # Revert menu check
+            self.update_preset_menu_check(old_preset)
+            print("Failed to switch to preset '%s'" % preset_name)
+            return False
+
+        # Success - persist to settings (will be saved in closeEvent)
+        self.settings[SETTING_CURRENT_PRESET] = preset_name
+
+        # Update menu check state
+        self.update_preset_menu_check(preset_name)
+
+        print("Switched to preset: %s" % preset_name)
+        return True
+
+    def update_preset_menu_check(self, preset_name):
+        """
+        Update Label Presets menu check state
+
+        Args:
+            preset_name: currently selected preset name
+        """
+        # Note: preset_action_group is created in build_preset_menu() during __init__
+        if not hasattr(self, 'preset_action_group'):
+            return  # Menu not built yet (should not happen in normal flow)
+
+        for action in self.preset_action_group.actions():
+            action.setChecked(action.data() == preset_name)
+
+    def build_preset_menu(self):
+        """
+        Build Label Presets menu by scanning all available preset files
+        """
+        preset_menu = self.menus.label_presets
+        preset_menu.clear()
+
+        # Create action group for single selection (reference: Format switch pattern)
+        self.preset_action_group = QActionGroup(self)
+        self.preset_action_group.setExclusive(True)
+
+        # Get all available presets
+        available_presets = self.get_available_presets()
+
+        for preset_name in available_presets:
+            action = QAction(preset_name, self, checkable=True)
+            action.setData(preset_name)  # Store preset name for later lookup
+
+            # Bind switch callback (use lambda to capture preset_name)
+            action.triggered.connect(
+                lambda checked, name=preset_name: self.switch_preset(name))
+
+            # If this is current preset, set as checked
+            if preset_name == self.current_preset:
+                action.setChecked(True)
+
+            self.preset_action_group.addAction(action)
+            preset_menu.addAction(action)
 
     def load_pascal_xml_by_filename(self, xml_path):
         if self.file_path is None:
