@@ -11,8 +11,8 @@ A **Label** is an annotation attached to a region in an image. In labelImg:
 - Persisted to disk as XML/JSON/TXT format (depends on `self.label_file_format`)
 
 **Key operations**:
-- Delete: `delete_selected_shape()` removes from both canvas and list
-- Restore: `restore_last_deleted_label()` pops from `label_deletion_stack` (ADR 003)
+- Delete: `delete_selected_shape()` removes from both canvas and list, pushes to `label_deletion_stack`
+- Restore: `restore_last_deleted_label()` pops from `label_deletion_stack` and restores label (ADR 003 - Issue #7)
 - Cycle: `cycle_next_label()` moves selection to next label (ADR 001)
 
 #### Image Deletion（图片删除）
@@ -76,8 +76,9 @@ self.cur_img_idx: int       # Current image index
 
 # Label management
 self.canvas.shapes: List[Shape]         # All shapes in current image
-self.label_deletion_stack: List[tuple]  # Undo stack for labels (current image only)
-                                         # Cleared when switching images or deleting image
+self.label_deletion_stack: List[tuple]  # Undo stack for labels: (shape, label_text, item_flags)
+                                         # Cleared when switching images, saving, or deleting image
+                                         # Press 'z' to restore (Issue #7 - ADR 003)
 
 # Image deletion
 self.image_deletion_stack: List[tuple]  # Undo stack for images: (trash_img_path, trash_label_path, original_dir)
