@@ -95,6 +95,9 @@ class MainWindow(QMainWindow, WindowMixin):
         # Image deletion stack for undo functionality (ADR 003)
         self.image_deletion_stack = []  # List of (trash_img_path, trash_label_path, original_dir)
 
+        # Label deletion stack for undo functionality (ADR 003 - Issue #7)
+        self.label_deletion_stack = []  # List of (shape, label_text, item_flags)
+
         # Load string bundle for i18n
         self.string_bundle = StringBundle.get_bundle()
         get_str = lambda str_id: self.string_bundle.get_string(str_id)
@@ -389,8 +392,10 @@ class MainWindow(QMainWindow, WindowMixin):
         labels.setShortcut('Ctrl+Shift+L')
 
         # Label list context menu.
+        restore_label = action('Restore Label', self.restore_last_deleted_label,
+                               'z', 'undo', 'Restore last deleted label')
         label_menu = QMenu()
-        add_actions(label_menu, (edit, delete))
+        add_actions(label_menu, (edit, delete, restore_label))
         self.label_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.label_list.customContextMenuRequested.connect(
             self.pop_label_list_menu)
@@ -1357,6 +1362,9 @@ class MainWindow(QMainWindow, WindowMixin):
             counter = self.counter_str()
             self.setWindowTitle(__appname__ + ' ' + file_path + ' ' + counter)
 
+            # Clear label deletion stack when switching images (ADR 003 - Issue #7)
+            self.label_deletion_stack.clear()
+
             # Default : select last item if there is at least one item
             if self.label_list.count():
                 self.label_list.setCurrentItem(self.label_list.item(self.label_list.count() - 1))
@@ -1721,6 +1729,8 @@ class MainWindow(QMainWindow, WindowMixin):
             self.set_clean()
             self.statusBar().showMessage('Saved to  %s' % annotation_file_path)
             self.statusBar().show()
+            # Clear label deletion stack after saving (ADR 003 - Issue #7)
+            self.label_deletion_stack.clear()
 
     def close_file(self, _value=False):
         if not self.may_continue():
@@ -1961,6 +1971,47 @@ class MainWindow(QMainWindow, WindowMixin):
         if trash_label_path and 'original_label_path' in locals():
             print(f"Restored label from trash: {original_label_path}")
 
+    def restore_last_deleted_label(self):
+        """
+        Restore the last deleted label from the stack (ADR 003 - Issue #7).
+        - Pops from label_deletion_stack (LIFO order)
+        - Restores shape to canvas.shapes and label_list
+        - Automatically selects the restored label
+        - Silent ignore if stack is empty
+        - Stack is cleared when switching images or saving file
+        """
+        if not self.label_deletion_stack:
+            return  # Silent ignore when stack is empty
+
+        # Pop the last deletion record
+        shape, label_text, item_flags = self.label_deletion_stack.pop()
+
+        # Add shape back to canvas
+        self.canvas.shapes.append(shape)
+
+        # Recreate the label item and add to label_list
+        item = HashableQListWidgetItem(label_text)
+        item.setFlags(item_flags)
+        self.label_list.addItem(item)
+
+        # Rebuild the mappings
+        self.shapes_to_items[shape] = item
+        self.items_to_shapes[item] = shape
+
+        # Select the restored label
+        self.label_list.setCurrentItem(item)
+        item.setSelected(True)
+        self.canvas.selected_shape = shape
+
+        # Update UI
+        self.canvas.update()
+        self.set_dirty()
+
+        # Enable shape-dependent actions if this is the first shape
+        if len(self.canvas.shapes) == 1:
+            for action in self.actions.onShapesPresent:
+                action.setEnabled(True)
+
     def reset_all(self):
         self.settings.reset()
         self.close()
@@ -2003,7 +2054,20 @@ class MainWindow(QMainWindow, WindowMixin):
             self.set_dirty()
 
     def delete_selected_shape(self):
-        self.remove_label(self.canvas.delete_selected())
+        # Get the shape before deleting
+        shape = self.canvas.delete_selected()
+        if shape is None:
+            return
+
+        # Store label information before removal (ADR 003 - Issue #7)
+        if shape in self.shapes_to_items:
+            item = self.shapes_to_items[shape]
+            label_text = item.text()
+            item_flags = item.flags()
+            # Push to label deletion stack for undo
+            self.label_deletion_stack.append((shape, label_text, item_flags))
+
+        self.remove_label(shape)
         self.set_dirty()
         if self.no_shapes():
             for action in self.actions.onShapesPresent:
