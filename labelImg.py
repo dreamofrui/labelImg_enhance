@@ -326,11 +326,11 @@ class MainWindow(QMainWindow, WindowMixin):
         self.zoom_widget.setEnabled(False)
 
         zoom_in = action(get_str('zoomin'), partial(self.add_zoom, 10),
-                         'Ctrl++', 'zoom-in', get_str('zoominDetail'), enabled=False)
+                         'Ctrl+]', 'zoom-in', get_str('zoominDetail'), enabled=False)
         zoom_out = action(get_str('zoomout'), partial(self.add_zoom, -10),
-                          'Ctrl+-', 'zoom-out', get_str('zoomoutDetail'), enabled=False)
+                          'Ctrl+[', 'zoom-out', get_str('zoomoutDetail'), enabled=False)
         zoom_org = action(get_str('originalsize'), partial(self.set_zoom, 100),
-                          'Ctrl+=', 'zoom', get_str('originalsizeDetail'), enabled=False)
+                          'Ctrl+0', 'zoom', get_str('originalsizeDetail'), enabled=False)
         fit_window = action(get_str('fitWin'), self.set_fit_window,
                             'Ctrl+F', 'fit-window', get_str('fitWinDetail'),
                             checkable=True, enabled=False)
@@ -339,7 +339,7 @@ class MainWindow(QMainWindow, WindowMixin):
                            checkable=True, enabled=False)
 
         lock_zoom = action('Lock Zoom', self.toggle_lock_zoom,
-                          'Ctrl+L', 'lock', 'Lock current zoom ratio',
+                          'Ctrl+K', 'lock', 'Lock current zoom ratio',
                           checkable=True, enabled=False)
 
         # Group zoom controls into a list for easier toggling.
@@ -364,11 +364,11 @@ class MainWindow(QMainWindow, WindowMixin):
         self.light_widget.setEnabled(False)
 
         light_brighten = action(get_str('lightbrighten'), partial(self.add_light, 10),
-                                'Ctrl+Shift++', 'light_lighten', get_str('lightbrightenDetail'), enabled=False)
+                                'Ctrl+Shift+]', 'light_lighten', get_str('lightbrightenDetail'), enabled=False)
         light_darken = action(get_str('lightdarken'), partial(self.add_light, -10),
-                              'Ctrl+Shift+-', 'light_darken', get_str('lightdarkenDetail'), enabled=False)
+                              'Ctrl+Shift+[', 'light_darken', get_str('lightdarkenDetail'), enabled=False)
         light_org = action(get_str('lightreset'), partial(self.set_light, 50),
-                           'Ctrl+Shift+=', 'light_reset', get_str('lightresetDetail'), checkable=True, enabled=False)
+                           'Ctrl+Shift+0', 'light_reset', get_str('lightresetDetail'), checkable=True, enabled=False)
         light_org.setChecked(True)
 
         # Group light controls into a list for easier toggling.
@@ -391,9 +391,34 @@ class MainWindow(QMainWindow, WindowMixin):
         labels.setText(get_str('showHide'))
         labels.setShortcut('Ctrl+Shift+L')
 
+        # Undo/Redo actions for label and image operations
+        restore_label = action('&Undo Delete Label', self.restore_last_deleted_label,
+                               'u', 'undo', 'Restore last deleted label')
+        self.addAction(restore_label)  # Add to MainWindow for global shortcut
+
+        restore_image_from_trash = action('Undo Delete &Image', self.restore_last_deleted_image,
+                                          'Shift+u', 'undo', 'Restore last deleted image from trash')
+        self.addAction(restore_image_from_trash)  # Add to MainWindow for global shortcut
+
+        # Navigation actions
+        prev_label = action('&Previous Label', self.cycle_prev_label,
+                           'k', 'prev', 'Cycle to previous label in list')
+        self.addAction(prev_label)  # Add to MainWindow for global shortcut
+
+        # Delete actions
+        delete_label_key = action('Delete Label (o)', self.delete_selected_shape,
+                                  'o', 'delete', 'Delete selected label with o key')
+        self.addAction(delete_label_key)  # Add to MainWindow for global shortcut
+
+        delete_current_img = action('Delete Current Image', self.delete_current_image,
+                                    'Shift+o', 'delete', 'Delete current image to trash')
+        self.addAction(delete_current_img)  # Add to MainWindow for global shortcut
+
+        delete_file_to_trash = action('Delete Selected Image', self.delete_file_to_trash_from_menu,
+                                       'Ctrl+Shift+Delete', 'delete', 'Delete selected file from list to trash')
+        self.addAction(delete_file_to_trash)  # Add to MainWindow for global shortcut
+
         # Label list context menu.
-        restore_label = action('Restore Label', self.restore_last_deleted_label,
-                               'z', 'undo', 'Restore last deleted label')
         label_menu = QMenu()
         add_actions(label_menu, (edit, delete, restore_label))
         self.label_list.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -401,10 +426,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self.pop_label_list_menu)
 
         # File list context menu (ADR 003)
-        delete_file_to_trash = action('Delete to Trash', self.delete_file_to_trash_from_menu,
-                                       'Ctrl+D', 'delete', 'Delete selected file to temporary trash')
-        restore_image_from_trash = action('Restore Image', self.restore_last_deleted_image,
-                                          'u', 'undo', 'Restore last deleted image from trash')
         file_list_menu = QMenu()
         add_actions(file_list_menu, (delete_file_to_trash, restore_image_from_trash))
 
@@ -425,11 +446,20 @@ class MainWindow(QMainWindow, WindowMixin):
                               zoomActions=zoom_actions,
                               lightBrighten=light_brighten, lightDarken=light_darken, lightOrg=light_org,
                               lightActions=light_actions,
+                              # Undo/Redo actions
+                              restoreLabel=restore_label, restoreImage=restore_image_from_trash,
+                              # Navigation actions
+                              prevLabel=prev_label,
+                              # Delete actions
+                              deleteLabelKey=delete_label_key, deleteCurrentImg=delete_current_img, deleteFileToTrash=delete_file_to_trash,
                               fileMenuActions=(
                                   open, open_dir, save, save_as, close, reset_all, quit),
                               beginner=(), advanced=(),
                               editMenu=(edit, copy, delete,
-                                        None, color1, self.draw_squares_option),
+                                        None, color1, self.draw_squares_option,
+                                        None, restore_label, restore_image_from_trash,
+                                        None, prev_label,
+                                        None, delete_label_key, delete_current_img, delete_file_to_trash),
                               beginnerContext=(create, edit, copy, delete),
                               advancedContext=(create_mode, edit_mode, edit, copy,
                                                delete, shape_line_color, shape_fill_color),
@@ -473,7 +503,7 @@ class MainWindow(QMainWindow, WindowMixin):
             labels, advanced_mode, None,
             hide_all, show_all, None,
             zoom_in, zoom_out, zoom_org, None,
-            fit_window, fit_width, None,
+            fit_window, fit_width, lock_zoom, None,
             light_brighten, light_darken, light_org))
 
         self.menus.file.aboutToShow.connect(self.update_file_menu)
@@ -487,7 +517,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.tools = self.toolbar('Tools')
         self.actions.beginner = (
             open, open_dir, change_save_dir, open_next_image, open_prev_image, verify, save, save_format, None, create, copy, delete, None,
-            zoom_in, zoom, zoom_out, fit_window, fit_width, lock_zoom, None,
+            zoom_in, zoom, zoom_out, fit_window, lock_zoom, fit_width, None,
             light_brighten, light, light_darken, light_org)
 
         self.actions.advanced = (
@@ -584,15 +614,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if event.key() == Qt.Key_Control:
             # Draw rectangle if Ctrl is pressed
             self.canvas.set_drawing_shape_to_square(True)
-        elif event.key() == Qt.Key_H:
-            # ADR 001: Cycle to previous label (backward, from last to first)
-            self.cycle_prev_label()
-        elif event.key() == Qt.Key_O:
-            # ADR 003: Delete current image to temporary trash
-            self.delete_current_image()
-        elif event.key() == Qt.Key_U:
-            # ADR 003: Restore last deleted image from trash
-            self.restore_last_deleted_image()
 
     def cycle_prev_label(self):
         """Cycle to previous label in the list (wraps around to last)."""
@@ -2185,7 +2206,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Update status bar or UI to show lock state
         status = "Zoom locked at {}%".format(self.locked_zoom_value) if checked else "Zoom unlocked"
-        self.status_bar.showMessage(status, 3000)
+        self.statusBar().showMessage(status, 3000)
 
 def inverted(color):
     return QColor(*[255 - v for v in color.getRgb()])
