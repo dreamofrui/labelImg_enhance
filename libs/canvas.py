@@ -720,6 +720,9 @@ class Canvas(QWidget):
     def load_shapes(self, shapes):
         self.shapes = list(shapes)
         self.current = None
+        # 清除选择状态，防止指向旧图片的shape引用
+        if self.selected_shape and self.selected_shape not in self.shapes:
+            self.de_select_shape()  # 会触发 selectionChanged.emit(False)
         self.repaint()
 
     def set_shape_visible(self, shape, value):
@@ -746,6 +749,7 @@ class Canvas(QWidget):
         self.de_select_shape()
         self.un_highlight()
         self.selected_shape_copy = None
+        self.shapes = []  # 清空shapes列表
 
         self.restore_cursor()
         self.pixmap = None

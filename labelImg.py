@@ -1004,7 +1004,14 @@ class MainWindow(QMainWindow, WindowMixin):
         else:
             shape = self.canvas.selected_shape
             if shape:
-                self.shapes_to_items[shape].setSelected(True)
+                # 防护：检查shape是否在字典中（防止选中旧图片的shape引用）
+                item = self.shapes_to_items.get(shape)
+                if item is not None:
+                    item.setSelected(True)
+                else:
+                    # shape不在字典中（可能来自旧图片），清除选择
+                    self.canvas.de_select_shape()
+                    self.label_list.clearSelection()
             else:
                 self.label_list.clearSelection()
         self.actions.delete.setEnabled(selected)
@@ -1428,6 +1435,8 @@ class MainWindow(QMainWindow, WindowMixin):
         self.label_list.clear()
         self.items_to_shapes.clear()
         self.shapes_to_items.clear()
+        # 强制清除 Canvas 的选择状态，防止指向旧 shapes
+        self.canvas.de_select_shape()
         # Note: Don't clear canvas.shapes here, as load_labels will call
         # canvas.load_shapes(s) which overwrites it
         if self.default_save_dir is not None:
