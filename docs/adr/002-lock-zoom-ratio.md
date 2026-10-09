@@ -22,14 +22,14 @@ Implemented
   - 锁定时：按钮高亮（背景色变化）+ 🔒图标
   - 解锁时：正常状态 + 🔓图标
 - **默认状态**：OFF（解锁），会话级，不持久化
-- **键盘快捷键**：无（仅工具栏按钮操作）
+- **键盘快捷键**：`Ctrl+K`，与工具栏按钮切换同一状态
 
 ### 锁定行为
 用户点击「锁定缩放」按钮时：
 1. **捕获当前缩放比例**：从 `self.zoom_widget.value()` 读取（百分比，如 150）
 2. **存储锁定值**：`self.locked_zoom_value = current_zoom`
-3. **设置锁定标志**：`self.lock_zoom = True`
-4. **后续图片加载**：`load_file()` 中跳过 `adjust_scale()` 逻辑，直接应用 `self.set_zoom(locked_zoom_value)`
+3. **设置锁定标志**：`self.lock_zoom_ratio = True`
+4. **后续图片加载**：`adjust_scale()` 检查锁定标志，并应用 `self.locked_zoom_value`
 
 **关键特性：严格比例保留**
 - 不考虑图片尺寸差异
@@ -40,11 +40,11 @@ Implemented
 锁定状态自动解除的两种方式：
 
 #### 方式1：用户主动解锁
-- 再次点击「锁定缩放」按钮 → Toggle OFF → `lock_zoom = False`
+- 再次点击「锁定缩放」按钮或按 `Ctrl+K` → Toggle OFF → `lock_zoom_ratio = False`
 
 #### 方式2：切换到自适应模式自动解锁
-- 点击 FIT_WINDOW 按钮 → `set_fit_window()` 中自动设置 `lock_zoom = False`
-- 点击 FIT_WIDTH 按钮 → `set_fit_width()` 中自动设置 `lock_zoom = False`
+- 点击 FIT_WINDOW 按钮 → `set_fit_window()` 中自动设置 `lock_zoom_ratio = False`
+- 点击 FIT_WIDTH 按钮 → `set_fit_width()` 中自动设置 `lock_zoom_ratio = False`
 - 按 `Ctrl+F` 快捷键（触发 `set_fit_window()`）→ 自动解锁
 - 按 `Ctrl+Shift+F` 快捷键（触发 `set_fit_width()`）→ 自动解锁
 - 所有自适应操作会同时更新「锁定缩放」按钮的视觉状态（checked=False）
@@ -53,7 +53,7 @@ Implemented
 
 ### 锁定期间手动缩放
 当锁定状态下，用户仍可以：
-- **滚轮缩放** / **Ctrl++/-/=** → `locked_zoom_value` **实时更新**
+- **Ctrl+滚轮** / **Ctrl+[ / Ctrl+]** → `locked_zoom_value` **实时更新**
 - 切换到下一张图片 → 使用更新后的 `locked_zoom_value`
 
 **场景示例**：
@@ -65,6 +65,8 @@ Implemented
 ```
 
 ## Implementation Notes
+
+> 以下为初版设计伪代码，保留决策背景。当前实现使用 `lock_zoom_ratio` 和 `self.actions.lockZoom`；`adjust_scale()` 应用锁定值，按钮与 `Ctrl+K` 调用 `toggle_lock_zoom()`。实际操作见 [当前实现](../current-behavior.md)。
 
 ### State Management
 ```python

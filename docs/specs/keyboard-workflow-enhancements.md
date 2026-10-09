@@ -1,5 +1,7 @@
 # Spec: Keyboard Workflow Enhancements
 
+> 历史设计，以下伪代码与原快捷键用于保留决策背景。当前实现以 [操作说明](../current-behavior.md) 为准：I 循环标签；O/U 删除/恢复框；Shift+O/Shift+U 删除/恢复图片。标签恢复记录在保存时清空，图片恢复记录在换目录时清空，图片与标注移动不具备事务原子性。
+
 ## Problem Statement
 
 当前 labelImg 在数据清理和批量标注场景下效率低下，主要问题包括：

@@ -196,7 +196,7 @@ You can refer to the below hotkeys to speed up your workflow.
 Steps (YOLO)
 ~~~~~~~~~~~~
 
-1. In ``data/predefined_classes.txt`` define the list of classes that will be used for your training.
+1. Define your classes in ``data/*.txt`` or ``data/label_presets/*.txt``, then select the preset from the Label Presets menu.
 
 2. Build and launch using the instructions above.
 
@@ -217,9 +217,10 @@ Note:
 Create pre-defined classes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can edit the
-`data/predefined\_classes.txt <https://github.com/tzutalin/labelImg/blob/master/data/predefined_classes.txt>`__
-to load pre-defined classes
+Create or edit a UTF-8 ``.txt`` file under ``data/`` or ``data/label_presets/`` (one class per line), then select it in Label Presets.
+The last selected preset is restored at startup. The legacy ``data/predefined_classes.txt`` is no longer shipped.
+
+See `current behavior and shortcuts <docs/current-behavior.md>`_ for this fork.
 
 Annotation visualization
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -257,11 +258,13 @@ Hotkeys
 +--------------------+--------------------------------------------+
 | del                | Delete the selected rect box               |
 +--------------------+--------------------------------------------+
-| Ctrl++             | Zoom in                                    |
+| Ctrl+]             | Zoom in                                    |
 +--------------------+--------------------------------------------+
-| Ctrl--             | Zoom out                                   |
+| Ctrl+[             | Zoom out                                   |
 +--------------------+--------------------------------------------+
 | ↑→↓←               | Keyboard arrows to move selected rect box  |
++--------------------+--------------------------------------------+
+| F / H              | Shrink/expand the selected rect box        |
 +--------------------+--------------------------------------------+
 
 **Verify Image:**

@@ -4,8 +4,8 @@ Users annotate multiple projects per day, each requiring different label sets (e
 
 ## Decision
 
-- **Storage**: Label presets stored as `.txt` files in `data/label_presets/` directory
-- **Default**: `data/predefined_classes.txt` remains the default preset (backward compatible)
+- **Storage**: Label presets are `.txt` files under `data/` and `data/label_presets/`; root files take precedence when names collide.
+- **Default**: Restore the saved preset; otherwise choose the first available preset sorted by name (currently ADC). The legacy `data/predefined_classes.txt` is no longer shipped.
 - **Naming**: File name without extension becomes preset name in UI (`cars.txt` → `cars`)
 - **UI**: Menu-based single-selection (similar to `Format` menu for PascalVOC/YOLO)
 - **Persistence**: Selected preset saved to `settings.pkl`, restored on next launch
@@ -13,7 +13,7 @@ Users annotate multiple projects per day, each requiring different label sets (e
 
 ## Why This Design
 
-**Storage location (`data/label_presets/`)**: Keeps preset files organized separately from the default, maintains backward compatibility for users who only have `predefined_classes.txt`.
+**Storage locations**: Existing root presets such as `data/ADC.txt` remain discoverable, while `data/label_presets/` keeps additional project lists organized.
 
 **Menu-based UI**: Users already understand the `Format` menu pattern (PascalVOC/YOLO switching). Reusing this interaction model reduces learning cost. Dropdown in toolbar was considered but clutters the interface when preset names are long.
 

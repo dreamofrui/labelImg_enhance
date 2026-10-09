@@ -1,178 +1,33 @@
-# labelImg Context
+# 图片标注领域
 
-## Domain Model
+本项目为图片区域附加标签，支持矩形标注、数据审查与误删恢复。
+当前操作和代码入口见 [当前实现](docs/current-behavior.md)，决策记录位于 `docs/adr/`。
 
-### Core Concepts
+## Language
 
-#### Label（标签）
-A **Label** is an annotation attached to a region in an image. In labelImg:
-- Represented as a **Shape** object in `canvas.shapes` (geometry + metadata)
-- Displayed as a **QListWidgetItem** in `label_list` (text + color indicator)
-- Persisted to disk as XML/JSON/TXT format (depends on `self.label_file_format`)
+**Label（标注）**：附着在图片某个区域上的类别与几何信息。
+_Avoid_：将单独的类别名称与完整标注混称为标签。
 
-**Key operations**:
-- Delete: `delete_selected_shape()` removes from both canvas and list, pushes to `label_deletion_stack`
-- Restore: `restore_last_deleted_label()` pops from `label_deletion_stack` and restores label (ADR 003 - Issue #7)
-- Cycle: `cycle_next_label()` moves selection to next label (ADR 001)
+**Bounding Box（标注框）**：以四条轴对齐边界描述标注区域的矩形。
 
-#### Label Preset（标签组）
-A **Label Preset** is a predefined set of label names for a specific annotation project. In labelImg:
-- Stored as `.txt` files under `data/label_presets/` directory (one label per line)
-- Loaded into `self.label_hist` at startup or when user switches presets
-- User selects one preset from the menu; selection persisted to `settings.pkl`
-- Switching presets clears temporary labels added during the current session
+**Selected Box（选中框）**：当前图片中明确选中的标注框，是键盘几何操作的目标。
+_Avoid_：将鼠标悬停高亮称为选中或对焦。
 
-**Terminology**:
-- _Avoid_: "label set", "label group", "label template", "classes file"
-- _Use_: "label preset" (noun), "switch preset" (verb)
+**Label Preset（标签预设）**：针对一个标注项目预先定义的类别名称列表。
+_Avoid_：label set、label group、label template。
 
-**Behavior** (ADR 004):
-- Default preset: `data/predefined_classes.txt` (backward compatible)
-- Additional presets: `data/label_presets/*.txt` (file name without extension = preset name)
-- Temporary labels: user-added labels during annotation are session-only, cleared on preset switch
-- No in-app preset editing: users manage `.txt` files directly in file system
+**Temporary Label（临时标签）**：标注会话中新输入、尚未写入预设文件的类别名称。
 
-#### Image Deletion（图片删除）
-**Temporary trash deletion** with undo support (ADR 003):
-- Deleted images move to system temp directory `%TEMP%/labelImg_trash_{timestamp}/`
-- Trash directory auto-created at app startup, old trash dirs (>24h) auto-cleaned
-- Both image file and label file are moved atomically
-- Same-name conflicts → overwrite old file (recent deletion overwrites previous)
-- `image_deletion_stack` maintains deletion order for undo (LIFO)
-- Restored images **insert at current position**, not original position
+**Box Resize Step（框缩放步长）**：一次扩张或收缩中每条边移动的原图像素数。
+_Avoid_：将边界偏移与比例缩放混用。
 
-**Navigation after deletion**:
-- Delete middle image → load next image (index unchanged, list shortened)
-- Delete last image → load previous image (index decremented)
-- Restore image → insert at current position, load restored image
+**Image Zoom（图片显示缩放）**：改变图片在画布中的显示比例，不改变标注坐标。
 
-#### Zoom Locking（缩放锁定）
-**Lock zoom ratio** across image navigation (ADR 002):
-- Toggle button in toolbar (checkable action, **no keyboard shortcut**)
-- When locked: apply fixed zoom ratio to all loaded images
-- Manual zoom adjustments update the locked value in real-time
-- Auto-unlock when switching to adaptive mode:
-  - Click FIT_WINDOW/FIT_WIDTH button
-  - Press `Ctrl+F` (fit window) or `Ctrl+Shift+F` (fit width)
+**Zoom Lock（缩放锁定）**：在浏览多张图片时维持同一图片显示比例的会话状态。
 
-### Current Enhancements (Proposed)
+**Label Recovery（标注恢复）**：恢复当前图片中最近删除的标注。
+_Avoid_：将其称为通用撤销，框缩放和拖动不在恢复范围内。
 
-#### ADR 001: 键盘循环聚焦标签
-- **Auto-focus**: Last label auto-selected when image loads (current default)
-- **'h' key**: Cycle to previous label (backward, wraps to last at beginning)
-- **Pure keyboard workflow**: D/A (navigate images) + h (cycle labels backward) + Delete (remove)
+**Image Recovery（图片恢复）**：将临时回收站中的已删除图片及可用关联标注移回原目录。
 
-#### ADR 002: 锁定缩放比例
-- **Lock button**: Toggle zoom lock (no keyboard shortcut by design)
-- **Behavior**: Fixed zoom ratio maintained across image navigation
-- **Visual feedback**: Button icon/color changes when locked
-
-#### ADR 003: 图片删除与恢复（临时回收站模式）
-- **Two-layer undo**:
-  - Label undo ('z'): current image only, cleared on image switch or image deletion
-  - Image undo ('u'): cross-directory, LIFO restoration
-- **'o' key**: Delete current image to temp trash (no confirmation dialog)
-- **'u' key**: Restore last deleted image, **insert at current position**
-- **Temp trash**: `%TEMP%/labelImg_trash_{timestamp}/`, auto-cleaned after 24 hours on app startup
-- **Same-name conflicts**: overwrite old file (recent deletion overwrites previous)
-- **File list context menu**: Delete/Restore actions
-
-## Technical Architecture
-
-### Key Components
-- `MainWindow` (libs/app.py): Main application controller
-- `Canvas` (libs/canvas.py): Drawing surface, shape management
-- `LabelFile` (libs/label_file.py): XML/JSON/TXT persistence
-- `Shape` (libs/shape.py): Geometry and metadata for annotations
-
-### State Management
-```python
-# Image navigation
-self.m_img_list: List[str]  # Paths to all images in current directory
-self.cur_img_idx: int       # Current image index
-
-# Label management
-self.canvas.shapes: List[Shape]         # All shapes in current image
-self.label_hist: List[str]              # Available labels for current preset (loaded from preset file)
-                                         # Temporary labels added during annotation are appended but not persisted
-                                         # Cleared and reloaded when switching presets (ADR 004)
-self.label_deletion_stack: List[tuple]  # Undo stack for labels: (shape, label_text, item_flags)
-                                         # Cleared when switching images, saving, or deleting image
-                                         # Press 'z' to restore (Issue #7 - ADR 003)
-
-# Label presets (ADR 004)
-self.current_preset: str                # Name of currently loaded preset (file name without extension)
-                                         # Persisted to settings.pkl, restored on next launch
-
-# Image deletion
-self.image_deletion_stack: List[tuple]  # Undo stack for images: (trash_img_path, trash_label_path, original_dir)
-self.trash_dir: str                     # Path to temp trash: %TEMP%/labelImg_trash_{timestamp}/
-
-# Zoom control
-self.lock_zoom: bool           # Is zoom locked?
-self.locked_zoom_value: int    # Locked zoom ratio (percentage)
-```
-
-### Keyboard Shortcuts
-
-#### Existing
-- `D`: Next image
-- `A`: Previous image
-- `W`: Create rectangle box
-- `Ctrl+S`: Save
-- `Delete`/`Backspace`: Remove selected label
-- `Ctrl++/Ctrl+-`: Zoom in/out
-- `Ctrl+Wheel`: Zoom
-- `Ctrl+F`: Fit to window
-- `Ctrl+Shift+F`: Fit to width
-
-#### Enhanced/New
-- `E`: Edit label (changed from Ctrl+E)
-- `i`: Cycle to previous label (changed from k, ADR 001)
-- `z`: Restore last deleted label (ADR 003)
-- `o`: Delete current image to trash (ADR 003)
-- `u`: Restore last deleted image (ADR 003)
-
-## User Workflows
-
-### Data Cleaning Workflow
-**Goal**: Review images and labels, delete low-quality data
-
-1. Open directory of images
-2. Image loads, last label auto-selected (default Qt behavior)
-3. Press `i` to cycle backward through labels
-4. Press `Delete` to remove bad labels
-5. Press `z` to undo label deletion if needed
-6. Press `o` to delete entire image if quality is poor
-7. Press `D` to next image (auto-save if enabled)
-8. Press `u` if previous deletion was a mistake
-
-### Zoom-Locked Labeling
-**Goal**: Maintain consistent zoom level across similar-sized images
-
-1. Open directory
-2. Zoom to comfortable level (e.g., 150%)
-3. Click "Lock Zoom" button in toolbar
-4. Navigate images with `D`/`A` - zoom stays at 150%
-5. Manually adjust zoom if needed (locked value updates)
-6. Click "Lock Zoom" again or "Fit Window" to unlock
-
-## Technical Context
-
-### Key Files
-- `libs/app.py`: Main application window (`MainWindow` class)
-  - Handles all keyboard shortcuts in `keyPressEvent()`
-  - Manages image list and navigation
-  - Coordinates between canvas, label list, and file I/O
-- `libs/canvas.py`: Drawing canvas (`Canvas` class)
-  - Shape rendering and interaction
-  - Mouse event handling
-  - Zoom and pan logic
-- `libs/shape.py`: Shape geometry definitions
-- `libs/label_file.py`: XML/JSON/TXT file I/O
-
-### Qt Widgets
-- `self.label_list` (QListWidget): Displays all labels in current image
-- `self.file_list_widget` (QListWidget): Displays all image files in directory
-- `self.canvas` (Canvas): Custom QWidget for image/shape rendering
-- `self.zoom_widget` (QSpinBox): Displays/controls zoom percentage
+**Temporary Trash（临时回收站）**：本次会话用于保存已删除图片及关联标注的临时存储。
