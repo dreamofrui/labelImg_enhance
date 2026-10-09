@@ -11,6 +11,7 @@ except ImportError:
 
 from libs.shape import Shape
 from libs.utils import distance
+from libs.box_geometry import ResizeResult, resize_rectangle
 
 CURSOR_DEFAULT = Qt.ArrowCursor
 CURSOR_POINT = Qt.PointingHandCursor
@@ -757,3 +758,40 @@ class Canvas(QWidget):
 
     def set_drawing_shape_to_square(self, status):
         self.draw_square = status
+
+    def resize_selected_shape(self, delta, bounds):
+        """Commit a complete resize only for a valid, idle selection."""
+        if (not self.isEnabled() or not self.pixmap or self.pixmap.isNull() or
+                not self.editing() or self.current is not None or
+                self.selected_shape_copy is not None or
+                QApplication.mouseButtons() or QApplication.activePopupWidget() or
+                QApplication.activeModalWidget()):
+            return ResizeResult('invalid_state')
+        shape = self.selected_shape
+        if shape is None:
+            return ResizeResult('no_selection')
+        if shape not in self.shapes:
+            self.de_select_shape()
+            return ResizeResult('stale_selection')
+        if not self.isVisible(shape):
+            return ResizeResult('hidden')
+        if not shape.is_closed():
+            return ResizeResult('invalid_geometry')
+
+        # Bounds supplied by a format may be stricter, never wider than the image.
+        try:
+            minimum_x, minimum_y, maximum_x, maximum_y = bounds
+            bounds = (max(0, minimum_x), max(0, minimum_y),
+                      min(self.pixmap.width(), maximum_x),
+                      min(self.pixmap.height(), maximum_y))
+        except (TypeError, ValueError):
+            return ResizeResult('invalid_bounds')
+        result = resize_rectangle([(p.x(), p.y()) for p in shape.points], delta, bounds)
+        if result.changed:
+            shape.points = [QPointF(x, y) for x, y in result.points]
+            self.un_highlight()
+            shape.highlight_clear()
+            self.prev_point = QPointF()
+            self.shapeMoved.emit()
+            self.update()
+        return result

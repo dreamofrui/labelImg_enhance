@@ -86,6 +86,11 @@ class MainWindow(QMainWindow, WindowMixin):
         self.settings = Settings()
         self.settings.load()
         settings = self.settings
+        saved_resize_step = settings.get(SETTING_BOX_RESIZE_STEP, DEFAULT_BOX_RESIZE_STEP)
+        if (isinstance(saved_resize_step, bool) or not isinstance(saved_resize_step, int) or
+                not MIN_BOX_RESIZE_STEP <= saved_resize_step <= MAX_BOX_RESIZE_STEP):
+            saved_resize_step = DEFAULT_BOX_RESIZE_STEP
+        settings[SETTING_BOX_RESIZE_STEP] = saved_resize_step
 
         self.os_name = platform.system()
 
@@ -388,6 +393,33 @@ class MainWindow(QMainWindow, WindowMixin):
                       enabled=False)
         self.edit_button.setDefaultAction(edit)
 
+        expand_box = action(get_str('expandBox'), partial(self.resize_selected_box, 1),
+                            'H', tip=get_str('expandBoxDetail'), enabled=False)
+        shrink_box = action(get_str('shrinkBox'), partial(self.resize_selected_box, -1),
+                            'F', tip=get_str('shrinkBoxDetail'), enabled=False)
+        for resize_action in (expand_box, shrink_box):
+            resize_action.setShortcutContext(Qt.WidgetShortcut)
+            resize_action.setAutoRepeat(False)
+            resize_action.installEventFilter(self)
+            self.canvas.addAction(resize_action)
+            self.label_list.addAction(resize_action)
+
+        self.box_resize_step = QSpinBox(self)
+        self.box_resize_step.setRange(MIN_BOX_RESIZE_STEP, MAX_BOX_RESIZE_STEP)
+        self.box_resize_step.setValue(saved_resize_step)
+        self.box_resize_step.setAccessibleName(get_str('boxResizeStep'))
+        self.box_resize_step.setToolTip(get_str('boxResizeStepDetail'))
+        self.box_resize_step.valueChanged.connect(self.set_box_resize_step)
+        step_label = QLabel(get_str('boxResizeStep'))
+        step_label.setBuddy(self.box_resize_step)
+        step_layout = QHBoxLayout()
+        step_layout.addWidget(step_label)
+        step_layout.addWidget(self.box_resize_step)
+        step_container = QWidget(self)
+        step_container.setLayout(step_layout)
+        resize_step_action = QWidgetAction(self)
+        resize_step_action.setDefaultWidget(step_container)
+
         shape_line_color = action(get_str('shapeLineColor'), self.choose_shape_line_color,
                                   icon='color_line', tip=get_str('shapeLineColorDetail'),
                                   enabled=False)
@@ -449,6 +481,8 @@ class MainWindow(QMainWindow, WindowMixin):
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
+                              expandBox=expand_box, shrinkBox=shrink_box,
+                              resizeStep=resize_step_action,
                               zoom=zoom, zoomIn=zoom_in, zoomOut=zoom_out, zoomOrg=zoom_org,
                               fitWindow=fit_window, fitWidth=fit_width, lockZoom=lock_zoom,
                               zoomActions=zoom_actions,
@@ -464,6 +498,7 @@ class MainWindow(QMainWindow, WindowMixin):
                                   open, open_dir, save, save_as, close, reset_all, quit),
                               beginner=(), advanced=(),
                               editMenu=(edit, copy, delete,
+                                         None, expand_box, shrink_box, resize_step_action,
                                         None, color1, self.draw_squares_option,
                                         None, restore_label, restore_image_from_trash,
                                         None, prev_label,
@@ -484,6 +519,11 @@ class MainWindow(QMainWindow, WindowMixin):
             recentFiles=QMenu(get_str('menu_openRecent')),
             labelList=label_menu,
             fileList=file_list_menu)
+
+        self.canvas.selectionChanged.connect(self.update_box_resize_actions)
+        self.canvas.drawingPolygon.connect(self.update_box_resize_actions)
+        self.label_list.itemChanged.connect(self.update_box_resize_actions)
+        self.menus.edit.aboutToShow.connect(self.update_box_resize_actions)
 
         # Auto saving : Enable auto saving if pressing next
         self.auto_saving = QAction(get_str('autoSaveMode'), self)
@@ -626,6 +666,69 @@ class MainWindow(QMainWindow, WindowMixin):
         if event.key() == Qt.Key_Control:
             # Draw rectangle if Ctrl is pressed
             self.canvas.set_drawing_shape_to_square(True)
+
+    def eventFilter(self, watched, event):
+        # The actions also appear in a menu; its shortcut must never edit a box
+        # while an input, another dock, popup, or dialog has keyboard focus.
+        if event.type() == QEvent.Shortcut and isinstance(watched, QAction):
+            if watched in (self.actions.expandBox, self.actions.shrinkBox):
+                if (getattr(event, 'isAutoRepeat', lambda: False)() or
+                        QApplication.focusWidget() not in
+                        (self.canvas, self.label_list) or
+                        QApplication.activeModalWidget() or QApplication.activePopupWidget()):
+                    return True
+        return super(MainWindow, self).eventFilter(watched, event)
+
+    def set_box_resize_step(self, value):
+        self.settings[SETTING_BOX_RESIZE_STEP] = value
+
+    def update_box_resize_actions(self, _value=None):
+        shape = self.canvas.selected_shape
+        enabled = bool(self.file_path and self.canvas.isEnabled() and
+                       self.canvas.pixmap and self.canvas.editing() and
+                       self.canvas.current is None and shape is not None and
+                       shape in self.canvas.shapes and shape in self.shapes_to_items and
+                       self.canvas.isVisible(shape) and shape.is_closed() and len(shape) == 4)
+        self.actions.expandBox.setEnabled(enabled)
+        self.actions.shrinkBox.setEnabled(enabled)
+
+    def resize_selected_box(self, direction):
+        """Shared entry point for the menu and scoped box resize shortcuts."""
+        get_str = self.string_bundle.get_string
+        shape = self.canvas.selected_shape
+        if shape is not None and (
+                shape not in self.canvas.shapes or
+                self.shapes_to_items.get(shape) is None or
+                self.items_to_shapes.get(self.shapes_to_items.get(shape)) is not shape):
+            self.canvas.de_select_shape()
+            self.label_list.clearSelection()
+            self.update_box_resize_actions()
+            self.status(get_str('boxResizeStaleSelection'), 3000)
+            return False
+        if not self.file_path or direction not in (-1, 1):
+            self.status(get_str('boxResizeUnavailable'), 3000)
+            return False
+
+        # Preserve the existing VOC/YOLO writer's minimum coordinate of 1.
+        minimum = 0 if self.label_file_format == LabelFileFormat.CREATE_ML else 1
+        bounds = (minimum, minimum, self.canvas.pixmap.width(), self.canvas.pixmap.height()) \
+            if self.canvas.pixmap else (minimum, minimum, 0, 0)
+        result = self.canvas.resize_selected_shape(direction * self.box_resize_step.value(), bounds)
+        if result.changed:
+            xs, ys = zip(*result.points)
+            width, height = max(xs) - min(xs), max(ys) - min(ys)
+            self.label_coordinates.setText(get_str('boxResizeDimensions').format(width, height))
+            self.status(get_str('boxResizeDone').format(self.box_resize_step.value(), width, height), 3000)
+        else:
+            messages = {'out_of_bounds': 'boxResizeBoundary',
+                        'too_small': 'boxResizeTooSmall',
+                        'invalid_geometry': 'boxResizeInvalidGeometry',
+                        'no_selection': 'boxResizeNoSelection',
+                        'stale_selection': 'boxResizeStaleSelection',
+                        'hidden': 'boxResizeHidden'}
+            self.status(get_str(messages.get(result.status, 'boxResizeUnavailable')), 3000)
+        self.update_box_resize_actions()
+        return result.changed
 
     def cycle_prev_label(self):
         """Cycle to previous label in the list (wraps around to last)."""
